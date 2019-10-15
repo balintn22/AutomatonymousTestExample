@@ -1,2 +1,3 @@
 # AutomatonymousTestExample
-This repo contains my attempt at implementing unit tests for an Automatonymous saga.
+This repo contains a sample Automatonymous saga and a corresponding set of unit tests.
+The state machine implemented by the saga: ![illustration](./StateMachineExample/LifeMachine.png)
