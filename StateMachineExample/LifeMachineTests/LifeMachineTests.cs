@@ -3,9 +3,8 @@ using Automatonymous.Testing;
 using FluentAssertions;
 using LifeMachine;
 using LifeMachine.Messages;
-using MassTransit;
 using MassTransit.Testing;
-using NUnit.Framework;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -13,7 +12,7 @@ using System.Threading.Tasks;
 
 namespace LifeMachineTests
 {
-    [TestFixture]
+    [TestClass]
     public class MyProcessStateMachineTests
     {
         InMemoryTestHarness _harness;
@@ -21,7 +20,7 @@ namespace LifeMachineTests
         StateMachineSagaTestHarness<LifeState, LifeStateMachine> _sagaHarness;
 
 
-        [SetUp]
+        [TestInitialize]
         public async Task InitializeTestHarness()
         {
             _harness = new InMemoryTestHarness();
@@ -29,6 +28,8 @@ namespace LifeMachineTests
             // This would be the way to fix the issue mentioned in test
             //  LifeStateMachine_ShouldBeInRecreating_AfterFinishWork()
             //  but don't know how to apply it to _harness.
+            //  See this https://masstransit-project.com/MassTransit/advanced/sagas/persistence.html#publishing-and-sending-from-sagas
+            //  and this https://stackoverflow.com/questions/55144350/masstransit-saga-azure-service-bus-receive-endpoint-setup
             //var bus = Bus.Factory.CreateUsingInMemory(cfg => {
             //    cfg.ReceiveEndpoint("queue", e => { e.UseInMemoryOutbox(); });
             //});
@@ -41,14 +42,14 @@ namespace LifeMachineTests
             await _harness.Start();
         }
 
-        [TearDown]
+        [TestCleanup]
         public void StopTestHarness()
         {
             _harness.Stop();
         }
 
 
-        [Test]
+        [TestMethod]
         public async Task LifeStateMachine_ShouldBeInWorking_AfterHelloWorld()
         {
             var sagaId = Guid.NewGuid();
@@ -66,7 +67,7 @@ namespace LifeMachineTests
                 new TimeSpan(0, 0, 30));
         }
 
-        [Test]
+        [TestMethod]
         public async Task LifeStateMachine_ShouldBeInRecreating_AfterFinishWork()
         {
             var instanceId = Guid.NewGuid();
