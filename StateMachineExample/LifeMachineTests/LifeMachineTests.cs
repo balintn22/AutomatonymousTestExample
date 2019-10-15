@@ -60,6 +60,12 @@ namespace LifeMachineTests
             var instanceId = Guid.NewGuid();
 
             await _harness.InputQueueSendEndpoint.Send(new HelloWorld(instanceId));
+
+            // This makes the test stable, which hints a message delivery concurrency issue...
+            await _sagaHarness.Match(
+                x => x.CorrelationId == instanceId && x.CurrentState == _machine.Working.Name,
+                new TimeSpan(0, 0, 30));
+
             await _harness.InputQueueSendEndpoint.Send(new FinishWork(instanceId, amountPaid: 1));
 
             IList<Guid> matchingSagaIds = await _sagaHarness.Match(
