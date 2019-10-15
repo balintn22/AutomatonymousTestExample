@@ -11,6 +11,15 @@ namespace LifeMachine.Messages
     /// </summary>
     public class FinishWork : CorrelatedBy<Guid>
     {
+        private string[] _sports = {
+            "football",
+            "basketball",
+            "rollerskating",
+            "swimming",
+            "skydiving",
+        };
+
+
         public Guid CorrelationId { get; set; }
 
         /// <summary>Represents the money paid for your work.</summary>
@@ -18,5 +27,13 @@ namespace LifeMachine.Messages
 
         /// <summary>Specifies a sport one's doing for recreation.</summary>
         public string Sport { get; set; }
+
+
+        public FinishWork(Guid correlationId, double amountPaid)
+        {
+            CorrelationId = correlationId;
+            AmountPaid = amountPaid;
+            Sport = _sports[new Random().Next(0, _sports.Length)];
+        }
     }
 }

@@ -11,6 +11,27 @@ namespace LifeMachine.Messages
     /// </summary>
     public class HelloWorld : CorrelatedBy<Guid>
     {
+        private static string[] _names = {
+            "Agnes",
+            "Albert",
+            "Andrew",
+            "Cyprian",
+            "Cyril",
+            "Florian",
+            "Francis",
+            "George",
+            "James",
+            "John",
+            "Joseph",
+            "Luke",
+            "Mary",
+            "Peter",
+            "Patrick",
+            "Paul",
+        };
+        private static int _nameIndex = 0;
+
+
         public Guid CorrelationId { get; set; }
 
         /// <summary>Contains the name of the person coming to this world.</summary>
@@ -25,7 +46,14 @@ namespace LifeMachine.Messages
         /// <param name="correlationId"></param>
         public HelloWorld(Guid correlationId)
         {
-            CorrelationId = correlationId;
+            lock (_names)
+            {
+                // This message will create new person, who needs a new saga, that needs a new id.
+                CorrelationId = correlationId;
+
+                Name = _names[_nameIndex];
+                _nameIndex = (_nameIndex + 1) % _names.Length;
+            }
         }
     }
 }

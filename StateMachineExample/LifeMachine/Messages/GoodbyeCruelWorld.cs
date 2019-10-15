@@ -11,5 +11,11 @@ namespace LifeMachine.Messages
     public class GoodbyeCruelWorld : CorrelatedBy<Guid>
     {
         public Guid CorrelationId { get; set; }
+
+
+        public GoodbyeCruelWorld(Guid correlationId)
+        {
+            CorrelationId = correlationId;
+        }
     }
 }

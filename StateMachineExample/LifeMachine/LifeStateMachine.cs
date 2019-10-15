@@ -2,13 +2,14 @@
 using Automatonymous.Binders;
 using LifeMachine.Messages;
 using System;
+using System.Diagnostics;
 
 namespace LifeMachine
 {
     /// <summary>
     /// Implements a simple, sample Automatonymous state machine.
     /// </summary>
-    public class LifeMachineSaga : MassTransitStateMachine<LifeState>
+    public class LifeStateMachine : MassTransitStateMachine<LifeState>
     {
         public State Working { get; private set; }
         public State Resting { get; private set; }
@@ -21,7 +22,7 @@ namespace LifeMachine
         public Event<Repeat> RepeatEvent { get; private set; }
 
 
-        public LifeMachineSaga()
+        public LifeStateMachine()
         {
             // Define current state property
             InstanceState(x => x.CurrentState);
@@ -41,7 +42,7 @@ namespace LifeMachine
                         context.Instance.CorrelationId = context.Data.CorrelationId;
                         context.Instance.Name = context.Data.Name;
                     })
-                    .Then(context => Console.WriteLine($"{context.Instance.Name} was born. Starting work."))
+                    .Then(context => Trace.WriteLine($"{context.Instance.Name} was born. Starting work."))
                     .TransitionTo(Working)
                 );
 
@@ -51,20 +52,20 @@ namespace LifeMachine
                         context.Instance.Wealth += context.Data.AmountPaid;
                         context.Instance.Sport = context.Data.Sport;
                     })
-                    .Then(context => Console.WriteLine($"{context.Instance.Name} finished work, starting {context.Instance.Sport}."))
+                    .Then(context => Trace.WriteLine($"{context.Instance.Name} finished work, starting {context.Instance.Sport}."))
                     .TransitionTo(Recreating)
                 );
 
             During(Recreating,
                 When(GotoBed)
                     .Then(context => context.Instance.Sport = null)
-                    .Then(context => Console.WriteLine($"{context.Instance.Name} finished recreation, going to bed."))
+                    .Then(context => Trace.WriteLine($"{context.Instance.Name} finished recreation, going to bed."))
                     .TransitionTo(Resting)
                 );
 
             During(Resting,
                 When(RepeatEvent)
-                    .Then(context => Console.WriteLine($"{context.Instance.Name} finished resting, starting it all over again."))
+                    .Then(context => Trace.WriteLine($"{context.Instance.Name} finished resting, starting it all over again."))
                     .TransitionTo(Working),
                 When(GoodbyeCruelWorldEvent)
                     .Finalize()   // Successful saga completion

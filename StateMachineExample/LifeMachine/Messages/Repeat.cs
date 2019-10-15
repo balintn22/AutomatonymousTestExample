@@ -11,5 +11,11 @@ namespace LifeMachine.Messages
     public class Repeat : CorrelatedBy<Guid>
     {
         public Guid CorrelationId { get; set; }
+
+
+        public Repeat(Guid correlationId)
+        {
+            CorrelationId = correlationId;
+        }
     }
 }
