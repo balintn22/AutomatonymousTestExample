@@ -16,17 +16,7 @@ namespace LifeMachineTests
     {
         InMemoryTestHarness _harness;
         LifeStateMachine _machine;
-        StateMachineSagaTestHarness<LifeState, LifeStateMachine> _saga;
-
-        [OneTimeSetUp]
-        public void ConfigureMessages()
-        {
-            //MessageCorrelation.UseCorrelationId<FinishWork>(x => x.CorrelationId);
-            //MessageCorrelation.UseCorrelationId<GoodbyeCruelWorld>(x => x.CorrelationId);
-            //MessageCorrelation.UseCorrelationId<GotoBed>(x => x.CorrelationId);
-            //MessageCorrelation.UseCorrelationId<HelloWorld>(x => x.CorrelationId);
-            //MessageCorrelation.UseCorrelationId<Repeat>(x => x.CorrelationId);
-        }
+        StateMachineSagaTestHarness<LifeState, LifeStateMachine> _sagaHarness;
 
 
         [SetUp]
@@ -34,7 +24,7 @@ namespace LifeMachineTests
         {
             _harness = new InMemoryTestHarness();
             _machine = new LifeStateMachine();
-            _saga = _harness.StateMachineSaga<LifeState, LifeStateMachine>(_machine);
+            _sagaHarness = _harness.StateMachineSaga<LifeState, LifeStateMachine>(_machine);
 
             _harness.Start().Wait();
         }
@@ -58,7 +48,7 @@ namespace LifeMachineTests
             // in the condition. Just fetching the saga by correlationid and testing
             // CurrentState may fail, as setting state (saga execution being async)
             // takes some time.
-            IList<Guid> matchingSagaIds = await _saga.Match(
+            IList<Guid> matchingSagaIds = await _sagaHarness.Match(
                 instance => instance.CorrelationId == sagaId
                     && instance.CurrentState == _machine.Working.Name,
                 new TimeSpan(0, 0, 30));
@@ -72,13 +62,13 @@ namespace LifeMachineTests
             await _harness.InputQueueSendEndpoint.Send(new HelloWorld(instanceId));
             await _harness.InputQueueSendEndpoint.Send(new FinishWork(instanceId, amountPaid: 1));
 
-            IList<Guid> matchingSagaIds = await _saga.Match(
+            IList<Guid> matchingSagaIds = await _sagaHarness.Match(
                 x => x.CorrelationId == instanceId && x.CurrentState == _machine.Recreating.Name,
                 new TimeSpan(0, 0, 30));
 
             // Grab the instance and Assert stuff...
             matchingSagaIds.Count.Should().Be(1);
-            ISagaInstance<LifeState> instance = _saga.Sagas.First(i => i.Saga.CorrelationId == instanceId);
+            ISagaInstance<LifeState> instance = _sagaHarness.Sagas.First(i => i.Saga.CorrelationId == instanceId);
             instance.Saga.Sport.Should().NotBeNullOrEmpty();
             instance.Saga.Wealth.Should().Be(1);
         }
