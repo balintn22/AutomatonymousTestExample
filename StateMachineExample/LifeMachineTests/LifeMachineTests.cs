@@ -24,16 +24,6 @@ namespace LifeMachineTests
         public async Task InitializeTestHarness()
         {
             _harness = new InMemoryTestHarness();
-
-            // This would be the way to fix the issue mentioned in test
-            //  LifeStateMachine_ShouldBeInRecreating_AfterFinishWork()
-            //  but don't know how to apply it to _harness.
-            //  See this https://masstransit-project.com/MassTransit/advanced/sagas/persistence.html#publishing-and-sending-from-sagas
-            //  and this https://stackoverflow.com/questions/55144350/masstransit-saga-azure-service-bus-receive-endpoint-setup
-            //var bus = Bus.Factory.CreateUsingInMemory(cfg => {
-            //    cfg.ReceiveEndpoint("queue", e => { e.UseInMemoryOutbox(); });
-            //});
-
             _machine = new LifeStateMachine();
             _sagaHarness = _harness.StateMachineSaga<LifeState, LifeStateMachine>(_machine);
 
@@ -49,22 +39,20 @@ namespace LifeMachineTests
         }
 
 
+        #region State Transition Tests
+
         [TestMethod]
         public async Task LifeStateMachine_ShouldBeInWorking_AfterHelloWorld()
         {
-            var sagaId = Guid.NewGuid();
+            var instanceId = Guid.NewGuid();
 
-            await _harness.InputQueueSendEndpoint.Send(new HelloWorld(sagaId));
+            await _harness.InputQueueSendEndpoint.Send(new HelloWorld(instanceId));
             // Once the above messages are all consumed and processed,
             // the state machine should be in the Working state
-            // Note about the test: it is important that the expected state is included
-            // in the condition. Just fetching the instance by correlationid and then testing
-            // CurrentState may fail, as setting state (saga execution being async)
-            // may take some time.
-            IList<Guid> matchingSagaIds = await _sagaHarness.Match(
-                instance => instance.CorrelationId == sagaId
-                    && instance.CurrentState == _machine.Working.Name,
-                new TimeSpan(0, 0, 30));
+
+            var sagaInstance = await FindSagaInstance(instanceId, _machine.Working);
+
+            sagaInstance.Should().NotBeNull();
         }
 
         [TestMethod]
@@ -75,15 +63,40 @@ namespace LifeMachineTests
             await _harness.InputQueueSendEndpoint.Send(new HelloWorld(instanceId));
             await _harness.InputQueueSendEndpoint.Send(new FinishWork(instanceId, amountPaid: 1));
 
-            IList<Guid> matchingSagaIds = await _sagaHarness.Match(
-                x => x.CorrelationId == instanceId && x.CurrentState == _machine.Recreating.Name,
-                new TimeSpan(0, 0, 30));
+            var sagaInstance = await FindSagaInstance(instanceId, _machine.Recreating);
 
             // Assert
-            matchingSagaIds.Count.Should().Be(1);
-            ISagaInstance<LifeState> instance = _sagaHarness.Sagas.First(i => i.Saga.CorrelationId == instanceId);
-            instance.Saga.Sport.Should().NotBeNullOrEmpty();
-            instance.Saga.Wealth.Should().Be(1);
+            sagaInstance.Should().NotBeNull();
+            sagaInstance.Saga.Sport.Should().NotBeNullOrEmpty();
+            sagaInstance.Saga.Wealth.Should().Be(1);
+        }
+
+        #endregion State Transition Tests
+
+
+        /// <summary>
+        /// Gets a saga instence with a specific correlation id if it is in a specific state.
+        /// If the instance is not yet in that state, waits for a certain amount of time.
+        /// Returns null if the instance can not be found or is not in the desired state.
+        /// </summary>
+        /// <param name="correlationId"></param>
+        /// <param name="state"></param>
+        /// <returns></returns>
+        private async Task<ISagaInstance<LifeState>> FindSagaInstance(Guid correlationId, State state)
+        {
+            // It is important that the expected state is included
+            // in the condition. Just fetching the instance by correlationid and then testing
+            // CurrentState may fail, as setting state (saga execution being async)
+            // may take some time.
+
+            IList<Guid> matchingSagaIds = await _sagaHarness.Match(
+                x => x.CorrelationId == correlationId && x.CurrentState == state.Name,
+                new TimeSpan(0, 0, 30));
+
+            if (matchingSagaIds.Count == 0)
+                return null;
+
+            return _sagaHarness.Sagas.FirstOrDefault(i => i.Saga.CorrelationId == correlationId);
         }
     }
 }
