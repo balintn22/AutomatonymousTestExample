@@ -7,7 +7,9 @@ using MassTransit.Testing;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace LifeMachineTests
@@ -18,6 +20,8 @@ namespace LifeMachineTests
         InMemoryTestHarness _harness;
         LifeStateMachine _machine;
         StateMachineSagaTestHarness<LifeState, LifeStateMachine> _sagaHarness;
+
+        private TimeSpan _testTimeout => Debugger.IsAttached ? TimeSpan.FromSeconds(50) : TimeSpan.FromSeconds(30);
 
 
         [TestInitialize]
@@ -50,9 +54,7 @@ namespace LifeMachineTests
             // Once the above messages are all consumed and processed,
             // the state machine should be in the Working state
 
-            var sagaInstance = await FindSagaInstance(instanceId, _machine.Working);
-
-            sagaInstance.Should().NotBeNull();
+            await AssertInstanceState(instanceId, _machine.Working);
         }
 
         [TestMethod]
@@ -63,19 +65,89 @@ namespace LifeMachineTests
             await _harness.InputQueueSendEndpoint.Send(new HelloWorld(instanceId));
             await _harness.InputQueueSendEndpoint.Send(new FinishWork(instanceId, amountPaid: 1));
 
-            var sagaInstance = await FindSagaInstance(instanceId, _machine.Recreating);
-
             // Assert
+            await AssertInstanceState(instanceId, _machine.Recreating);
+            var sagaInstance = GetSagaInstance(instanceId);
             sagaInstance.Should().NotBeNull();
             sagaInstance.Saga.Sport.Should().NotBeNullOrEmpty();
             sagaInstance.Saga.Wealth.Should().Be(1);
         }
 
+        [TestMethod]
+        public async Task LifeStateMachine_ShouldBeInResting_AfterGotoBed()
+        {
+            var instanceId = Guid.NewGuid();
+
+            await _harness.InputQueueSendEndpoint.Send(new HelloWorld(instanceId));
+            //await WaitForState(instanceId, _machine.Working);
+            await _harness.InputQueueSendEndpoint.Send(new FinishWork(instanceId, amountPaid: 1));
+            // Note: Without this wait, the test is not reliable. May have something
+            // to do with message delivery/state persistence.
+            // See https://masstransit-project.com/MassTransit/advanced/sagas/persistence.html#publishing-and-sending-from-sagas
+            await WaitForState(instanceId, _machine.Recreating);
+            await _harness.InputQueueSendEndpoint.Send(new GotoBed(instanceId));
+
+            // Assert
+            await AssertInstanceState(instanceId, _machine.Resting);
+        }
+
+        [TestMethod]
+        public async Task LifeStateMachine_ShouldBeInWorking_AfterRepeat()
+        {
+            var instanceId = Guid.NewGuid();
+
+            await _harness.InputQueueSendEndpoint.Send(new HelloWorld(instanceId));
+            //await WaitForState(instanceId, _machine.Working);
+            await _harness.InputQueueSendEndpoint.Send(new FinishWork(instanceId, amountPaid: 1));
+            await WaitForState(instanceId, _machine.Recreating);
+            await _harness.InputQueueSendEndpoint.Send(new GotoBed(instanceId));
+            await WaitForState(instanceId, _machine.Resting);
+            await _harness.InputQueueSendEndpoint.Send(new Repeat(instanceId));
+
+            // Assert
+            await AssertInstanceState(instanceId, _machine.Working);
+        }
+
+        [TestMethod]
+        public async Task LifeStateMachine_ShouldBeInFinal_AfterGoodbyeCruelWorld()
+        {
+            var instanceId = Guid.NewGuid();
+
+            await _harness.InputQueueSendEndpoint.Send(new HelloWorld(instanceId));
+            //await WaitForState(instanceId, _machine.Working);
+            await _harness.InputQueueSendEndpoint.Send(new FinishWork(instanceId, amountPaid: 1));
+            await WaitForState(instanceId, _machine.Recreating);
+            await _harness.InputQueueSendEndpoint.Send(new GotoBed(instanceId));
+            await WaitForState(instanceId, _machine.Resting);
+            await _harness.InputQueueSendEndpoint.Send(new GoodbyeCruelWorld(instanceId));
+
+            // Assert
+            await AssertInstanceState(instanceId, _machine.Final);
+        }
+
         #endregion State Transition Tests
 
 
+        #region Test Helpers
+
         /// <summary>
-        /// Gets a saga instence with a specific correlation id if it is in a specific state.
+        /// Asserts whether the saga instance is in the expected state.
+        /// </summary>
+        private async Task AssertInstanceState(Guid correlationId, State expectedState)
+        {
+            // Wait for the instance to transition to the expected state
+            ISagaInstance<LifeState> sagaInstance = await FindSagaInstance(correlationId, expectedState);
+
+            if (sagaInstance == null)
+            {
+                // Instance is not in the correct state, fetch it anyway
+                sagaInstance = _sagaHarness.Sagas.FirstOrDefault(i => i.Saga.CorrelationId == correlationId);
+                Assert.Fail($"Saga instance {correlationId} was expected to be in {expectedState} state, but it is in {sagaInstance.Saga.CurrentState}.");
+            }
+        }
+
+        /// <summary>
+        /// Gets a saga instance with a specific correlation id if it is in a specific state.
         /// If the instance is not yet in that state, waits for a certain amount of time.
         /// Returns null if the instance can not be found or is not in the desired state.
         /// </summary>
@@ -84,19 +156,51 @@ namespace LifeMachineTests
         /// <returns></returns>
         private async Task<ISagaInstance<LifeState>> FindSagaInstance(Guid correlationId, State state)
         {
-            // It is important that the expected state is included
-            // in the condition. Just fetching the instance by correlationid and then testing
-            // CurrentState may fail, as setting state (saga execution being async)
-            // may take some time.
+            ISagaInstance<LifeState> sagaInstance;
+            if (state == _machine.Final)
+            {   // Match doesn't seem to work with the Final state, check that by name
+                var startTime = DateTime.Now;
+                while (true)
+                {
+                    Thread.Sleep(100);
+                    sagaInstance = _sagaHarness.Sagas.FirstOrDefault(instance => instance.Saga.CurrentState == "Final");
+                    if (sagaInstance != null)
+                        break;
+                    if (DateTime.Now - startTime > _testTimeout)
+                        break;
+                };
+            }
+            else
+            {
+                // Wait till the saga instance transitions to the expected state - or fail after a timeout.
+                IList<Guid> matchingSagaIds = await _sagaHarness.Match(
+                    x => x.CorrelationId == correlationId && x.CurrentState == state.Name,
+                    _testTimeout);
 
-            IList<Guid> matchingSagaIds = await _sagaHarness.Match(
-                x => x.CorrelationId == correlationId && x.CurrentState == state.Name,
-                new TimeSpan(0, 0, 30));
+                if (matchingSagaIds.Count == 0)
+                    return null;
 
-            if (matchingSagaIds.Count == 0)
-                return null;
+                sagaInstance = _sagaHarness.Sagas.FirstOrDefault(i => i.Saga.CorrelationId == correlationId);
+            }
 
+            return sagaInstance;
+        }
+
+        /// <summary>
+        /// Gets a saga instance by id.
+        /// Returns null if an instance with that correlationid doesn't exist.
+        /// </summary>
+        private ISagaInstance<LifeState> GetSagaInstance(Guid correlationId)
+        {
             return _sagaHarness.Sagas.FirstOrDefault(i => i.Saga.CorrelationId == correlationId);
         }
+
+        /// <summary>Waits until the saga instance enters the desired state.</summary>
+        private async Task WaitForState(Guid correlationId, State state)
+        {
+            await FindSagaInstance(correlationId, state);
+        }
+
+        #endregion Test Helpers
     }
 }
